@@ -14,6 +14,9 @@ coders-skills = { path = "../coders-skills" }
 coders-core = { path = "../coders-core" }
 tokio.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 anyhow.workspace = true
 dirs.workspace = true
 toml = "0.8"
+indicatif = "0.17"
+console = "0.15"

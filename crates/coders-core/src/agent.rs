@@ -1,8 +1,21 @@
 use anyhow::{Context, Result};
 use coders_provider::{ChatRequest, ContentBlock, Message, ProviderClient, StopReason, ToolDef};
 use coders_tools::Tool;
+use serde_json::Value;
 
 const MAX_TOOL_ROUNDS: usize = 25;
+
+/// Emitted as the agent works through a turn so a caller (the REPL, a
+/// future TUI, ...) can show progress instead of going silent until the
+/// final answer.
+#[derive(Debug, Clone)]
+pub enum AgentEvent {
+    /// About to send a request to the provider — may be the first turn, or
+    /// a follow-up after feeding tool results back in.
+    Thinking,
+    ToolCall { name: String, input: Value },
+    ToolResult { name: String, output: String, is_error: bool },
+}
 
 /// Owns conversation history and drives the read-plan-act loop: send the
 /// transcript to the model, execute any tool calls it asks for, feed the
@@ -33,8 +46,10 @@ impl Agent {
     }
 
     /// Sends one user turn through the loop, executing any requested tools
-    /// along the way, and returns the model's final text reply.
-    pub async fn send(&mut self, user_input: &str) -> Result<String> {
+    /// along the way, and returns the model's final text reply. `on_event`
+    /// fires around each provider call and tool execution so a caller can
+    /// show live progress instead of going silent until the final answer.
+    pub async fn send(&mut self, user_input: &str, mut on_event: impl FnMut(AgentEvent)) -> Result<String> {
         self.history.push(Message::user_text(user_input));
 
         for _ in 0..MAX_TOOL_ROUNDS {
@@ -46,6 +61,7 @@ impl Agent {
                 max_tokens: self.max_tokens,
             };
 
+            on_event(AgentEvent::Thinking);
             let response = self.provider.chat(request).await.context("provider chat call failed")?;
             self.history.push(Message { role: coders_provider::Role::Assistant, content: response.content.clone() });
 
@@ -58,6 +74,7 @@ impl Agent {
 
             let mut result_blocks = Vec::new();
             for (id, name, input) in tool_uses {
+                on_event(AgentEvent::ToolCall { name: name.clone(), input: input.clone() });
                 let outcome = match self.find_tool(&name) {
                     Some(tool) => tool.execute(input).await,
                     None => Err(anyhow::anyhow!("unknown tool: {name}")),
@@ -66,6 +83,7 @@ impl Agent {
                     Ok(text) => (text, false),
                     Err(err) => (err.to_string(), true),
                 };
+                on_event(AgentEvent::ToolResult { name, output: content.clone(), is_error });
                 result_blocks.push(ContentBlock::ToolResult { tool_use_id: id, content, is_error });
             }
             self.history.push(Message { role: coders_provider::Role::User, content: result_blocks });
