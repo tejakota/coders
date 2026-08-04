@@ -1,0 +1,19 @@
+[package]
+name = "coders-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "coders"
+path = "src/main.rs"
+
+[dependencies]
+coders-provider = { path = "../coders-provider" }
+coders-tools = { path = "../coders-tools" }
+coders-skills = { path = "../coders-skills" }
+coders-core = { path = "../coders-core" }
+tokio.workspace = true
+serde.workspace = true
+anyhow.workspace = true
+dirs.workspace = true
+toml = "0.8"

@@ -1,0 +1,11 @@
+[package]
+name = "coders-skills"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+coders-tools = { path = "../coders-tools" }
+serde_json.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+dirs.workspace = true
