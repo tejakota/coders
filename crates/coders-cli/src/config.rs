@@ -14,6 +14,10 @@ api_key_env = "ANTHROPIC_API_KEY"
 # override the default endpoint, e.g. for Ollama:
 # base_url = "http://localhost:11434/v1/chat/completions"
 
+# path to an extra CA cert (PEM/CRT) to trust, e.g. for a corporate VPN
+# or proxy that TLS-inspects with its own root certificate:
+# extra_ca_cert = "C:\\path\\to\\corp-ca.pem"
+
 # system_prompt = "You are my coding assistant."
 "#;
 
@@ -36,6 +40,9 @@ pub struct Config {
     pub api_key_env: Option<String>,
     /// Override the default endpoint, e.g. for Ollama: "http://localhost:11434/v1/chat/completions".
     pub base_url: Option<String>,
+    /// Path to an extra CA cert (PEM/CRT) to trust, e.g. for a corporate
+    /// VPN/proxy that TLS-inspects with its own root certificate.
+    pub extra_ca_cert: Option<String>,
     pub system_prompt: Option<String>,
 }
 

@@ -20,7 +20,10 @@ async fn main() -> Result<()> {
     }
 
     let config = Config::load()?;
-    let provider = build_provider(&config.provider, ProviderConfig { api_key: config.api_key(), base_url: config.base_url.clone() })?;
+    let provider = build_provider(
+        &config.provider,
+        ProviderConfig { api_key: config.api_key(), base_url: config.base_url.clone(), extra_ca_cert: config.extra_ca_cert.clone() },
+    )?;
 
     let mut tools = coders_tools::builtin_tools();
     let skills = coders_skills::load_skills(&coders_skills::default_skill_dirs());
