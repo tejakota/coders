@@ -39,6 +39,7 @@ model = "claude-sonnet-5"
 api_key_env = "ANTHROPIC_API_KEY"   # name of the env var holding your key
 
 # base_url = "http://localhost:11434/v1/chat/completions"  # e.g. Ollama
+# extra_ca_cert = "C:\\path\\to\\corp-ca.pem"              # see "Corporate VPN / proxy TLS" below
 # system_prompt = "You are my coding assistant."
 ```
 
@@ -51,6 +52,19 @@ Then run:
 ```sh
 coders
 ```
+
+### Corporate VPN / proxy TLS ("invalid peer certificate")
+
+`coders` uses rustls with the OS's native certificate store (Windows
+Certificate Store, macOS Keychain, or the system CA bundle on Linux), so it
+already trusts any root CA installed system-wide — including ones a
+corporate VPN client or MITM-inspecting proxy installs automatically.
+
+If you hit `invalid peer certificate` or `client error (connect)` anyway
+(e.g. your IT team hands you a standalone `.pem`/`.crt` instead of
+installing it into the OS store), point `extra_ca_cert` in
+`~/.coders/config.toml` at that file — it gets trusted in addition to the
+native store, no restart or reinstall needed beyond editing the config.
 
 ## Skills
 
@@ -71,13 +85,20 @@ Skill names and descriptions are listed in the system prompt; the model
 calls the built-in `skill` tool with a skill's name to load its full body
 into context before acting on it.
 
+Two skills — `code-analysis` and `code-generation` (Python, JS, TS, HTML,
+Dart, Rust) — are bundled into the binary itself and auto-installed into
+`~/.coders/skills/` on first run. They're never overwritten once present,
+so editing them locally sticks.
+
 ## Workspace layout
 
 - `crates/coders-provider` — `ProviderClient` trait + Anthropic and
-  OpenAI-compatible backends
+  OpenAI-compatible backends; TLS via rustls + OS native cert store, with
+  optional `extra_ca_cert` support
 - `crates/coders-tools` — `Tool` trait + built-ins (`read_file`,
-  `write_file`, `bash`)
-- `crates/coders-skills` — SKILL.md loader + the `skill` tool
+  `write_file`, `bash`, `grep`, `find`)
+- `crates/coders-skills` — SKILL.md loader, the `skill` tool, and the two
+  bundled skills under `assets/skills/`
 - `crates/coders-core` — `Agent`: the send → tool-call → tool-result loop
 - `crates/coders-cli` — the `coders` binary, config, REPL
 
