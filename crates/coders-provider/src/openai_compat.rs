@@ -81,7 +81,39 @@ fn messages_to_json(messages: &[Message]) -> Vec<Value> {
     out
 }
 
-fn parse_response(payload: &Value) -> (Vec<ContentBlock>, StopReason) {
+/// Builds an OpenAI chat-completions request body. `max_tokens_field` lets
+/// the `custom` provider rename the token-limit key for gateways that
+/// require e.g. `max_completion_tokens` instead of `max_tokens`.
+pub(crate) fn build_body(request: &ChatRequest, max_tokens_field: &str) -> Value {
+    let mut messages = Vec::new();
+    if let Some(system) = &request.system {
+        messages.push(json!({ "role": "system", "content": system }));
+    }
+    messages.extend(messages_to_json(&request.messages));
+
+    let tools: Vec<Value> = request
+        .tools
+        .iter()
+        .map(|t| {
+            json!({
+                "type": "function",
+                "function": { "name": t.name, "description": t.description, "parameters": t.input_schema },
+            })
+        })
+        .collect();
+
+    let mut body = json!({
+        "model": request.model,
+        "messages": messages,
+    });
+    body[max_tokens_field] = json!(request.max_tokens);
+    if !tools.is_empty() {
+        body["tools"] = json!(tools);
+    }
+    body
+}
+
+pub(crate) fn parse_response(payload: &Value) -> (Vec<ContentBlock>, StopReason) {
     let choice = &payload["choices"][0];
     let message = &choice["message"];
     let mut content = Vec::new();
@@ -115,31 +147,7 @@ fn parse_response(payload: &Value) -> (Vec<ContentBlock>, StopReason) {
 #[async_trait]
 impl ProviderClient for OpenAiCompatProvider {
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
-        let mut messages = Vec::new();
-        if let Some(system) = &request.system {
-            messages.push(json!({ "role": "system", "content": system }));
-        }
-        messages.extend(messages_to_json(&request.messages));
-
-        let tools: Vec<Value> = request
-            .tools
-            .iter()
-            .map(|t| {
-                json!({
-                    "type": "function",
-                    "function": { "name": t.name, "description": t.description, "parameters": t.input_schema },
-                })
-            })
-            .collect();
-
-        let mut body = json!({
-            "model": request.model,
-            "messages": messages,
-            "max_tokens": request.max_tokens,
-        });
-        if !tools.is_empty() {
-            body["tools"] = json!(tools);
-        }
+        let body = build_body(&request, "max_tokens");
 
         let mut req = self.client.post(self.url()).header("content-type", "application/json").json(&body);
         if !self.config.api_key.is_empty() {

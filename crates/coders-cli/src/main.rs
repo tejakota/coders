@@ -1,9 +1,12 @@
 mod config;
+mod repl;
 
 use anyhow::Result;
 use coders_core::Agent;
 use coders_provider::{build_provider, ProviderConfig};
 use config::Config;
+use console::style;
+use repl::ReplUi;
 use std::io::Write;
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are coders, a terminal-based coding assistant. \
@@ -20,9 +23,15 @@ async fn main() -> Result<()> {
     }
 
     let config = Config::load()?;
+    let custom = config.custom.as_ref().map(|c| c.to_provider_options()).transpose()?;
     let provider = build_provider(
         &config.provider,
-        ProviderConfig { api_key: config.require_api_key()?, base_url: config.base_url.clone(), extra_ca_cert: config.extra_ca_cert.clone() },
+        ProviderConfig {
+            api_key: config.require_api_key()?,
+            base_url: config.base_url.clone(),
+            extra_ca_cert: config.extra_ca_cert.clone(),
+            custom,
+        },
     )?;
 
     let mut tools = coders_tools::builtin_tools();
@@ -41,8 +50,9 @@ async fn main() -> Result<()> {
     println!("Type your request, or /exit to quit.\n");
 
     let stdin = std::io::stdin();
+    let mut ui = ReplUi::new();
     loop {
-        print!("> ");
+        print!("{} ", style(">").green().bold());
         std::io::stdout().flush().ok();
 
         let mut line = String::new();
@@ -57,9 +67,15 @@ async fn main() -> Result<()> {
             break;
         }
 
-        match agent.send(line).await {
-            Ok(reply) => println!("\n{reply}\n"),
-            Err(err) => eprintln!("\nerror: {err:#}\n"),
+        match agent.send(line, |event| ui.on_event(event)).await {
+            Ok(reply) => {
+                ui.finish();
+                println!("\n{reply}\n");
+            }
+            Err(err) => {
+                ui.finish();
+                eprintln!("\n{} {err:#}\n", style("error:").red().bold());
+            }
         }
     }
 

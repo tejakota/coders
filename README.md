@@ -1,8 +1,8 @@
 # coders
 
 A terminal coding assistant, like Claude Code, that works with any LLM that
-exposes an API — Anthropic, OpenAI, or any OpenAI-compatible endpoint
-(Ollama, vLLM, OpenRouter, etc).
+exposes an API — Anthropic, OpenAI, any OpenAI-compatible endpoint (Ollama,
+vLLM, OpenRouter, etc), or a fully custom company gateway.
 
 ## Install
 
@@ -34,7 +34,7 @@ default, override with `CODERS_INSTALL_DIR`) and scaffolds `~/.coders/`.
 Edit `~/.coders/config.toml`:
 
 ```toml
-provider = "anthropic"        # "anthropic" | "openai" | "ollama"
+provider = "anthropic"        # "anthropic" | "openai" | "ollama" | "custom"
 model = "claude-sonnet-5"
 
 # Either paste your key directly...
@@ -77,6 +77,39 @@ installing it into the OS store), point `extra_ca_cert` in
 `~/.coders/config.toml` at that file — it gets trusted in addition to the
 native store, no restart or reinstall needed beyond editing the config.
 
+### Custom / company gateways
+
+`provider = "openai"` stays plain-vanilla OpenAI chat-completions — no
+per-company hacks live there. For a gateway that's *close to* OpenAI's or
+Anthropic's shape but not identical (a renamed field like
+`max_completion_tokens` instead of `max_tokens`, a different auth header,
+extra required fields), use `provider = "custom"` and configure the
+differences instead of patching code:
+
+```toml
+provider = "custom"
+model = "gpt-4o-company"
+base_url = "https://gateway.example.com/v1/chat/completions"
+api_key = "..."
+
+[custom]
+style = "openai"                        # "openai" | "anthropic" — base request/response shape
+max_tokens_field = "max_completion_tokens"   # only used when style = "openai"
+auth_header = "Authorization"           # e.g. "api-key" for some gateways
+auth_scheme = "Bearer "                 # prefix before the key; "" for raw-key headers
+
+[custom.extra_headers]
+"api-version" = "2024-05-01"
+
+[custom.extra_body]
+temperature = 0.3
+user = "my-app"
+```
+
+`extra_body` accepts arbitrary fields — anything in that table gets merged
+into the JSON request body as-is, overriding same-named fields the base
+`style` would otherwise set.
+
 ## Skills
 
 Drop a `SKILL.md` file in `~/.coders/skills/<name>/` (user-level) or
@@ -101,17 +134,37 @@ Dart, Rust) — are bundled into the binary itself and auto-installed into
 `~/.coders/skills/` on first run. They're never overwritten once present,
 so editing them locally sticks.
 
+## REPL
+
+Tool calls and their results print live as the agent works, instead of the
+terminal going silent until the final answer:
+
+```
+> find the auth middleware
+-> grep({"pattern":"middleware","path":"src"})
+  src/auth.rs:12: pub fn auth_middleware(req: Request) -> Response {
+
+It's in src/auth.rs:12.
+```
+
+While waiting on the model or a tool, a spinner plays a cute word
+telegraphed in Morse code, revealed dot-by-dot, cycling until the turn
+resolves. Colors and the spinner both auto-disable when stdout isn't a
+terminal (piped output, `NO_COLOR`, CI, etc).
+
 ## Workspace layout
 
-- `crates/coders-provider` — `ProviderClient` trait + Anthropic and
-  OpenAI-compatible backends; TLS via rustls + OS native cert store, with
-  optional `extra_ca_cert` support
+- `crates/coders-provider` — `ProviderClient` trait + Anthropic,
+  OpenAI-compatible, and `custom` backends; TLS via rustls + OS native cert
+  store, with optional `extra_ca_cert` support
 - `crates/coders-tools` — `Tool` trait + built-ins (`read_file`,
   `write_file`, `bash`, `grep`, `find`)
 - `crates/coders-skills` — SKILL.md loader, the `skill` tool, and the two
   bundled skills under `assets/skills/`
-- `crates/coders-core` — `Agent`: the send → tool-call → tool-result loop
-- `crates/coders-cli` — the `coders` binary, config, REPL
+- `crates/coders-core` — `Agent`: the send → tool-call → tool-result loop,
+  emitting `AgentEvent`s a caller can render live
+- `crates/coders-cli` — the `coders` binary, config, REPL (spinner + colored
+  tool-call output)
 
 ## Building prebuilt binaries yourself
 

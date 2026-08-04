@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 const DEFAULT_CONFIG_TEMPLATE: &str = r#"# coders config — edit this file, then re-run `coders`.
 
-# "anthropic", "openai", or "ollama" (any OpenAI-compatible endpoint)
+# "anthropic", "openai", "ollama" (any OpenAI-compatible endpoint), or
+# "custom" (any other API — a company gateway, Azure OpenAI, etc; see the
+# [custom] section below)
 provider = "anthropic"
 model = "claude-sonnet-5"
 
@@ -22,6 +24,23 @@ api_key_env = "ANTHROPIC_API_KEY"
 # extra_ca_cert = "C:\\path\\to\\corp-ca.pem"
 
 # system_prompt = "You are my coding assistant."
+
+# provider = "custom": for a gateway that mostly speaks OpenAI's or
+# Anthropic's request shape but has its own quirks (a renamed field, a
+# different auth header, extra required fields). Nothing here is read
+# unless provider = "custom" (or "others") above.
+# [custom]
+# style = "openai"                       # "openai" | "anthropic" — base request/response shape
+# max_tokens_field = "max_completion_tokens"   # only used when style = "openai"
+# auth_header = "Authorization"          # e.g. "api-key" for some gateways
+# auth_scheme = "Bearer "                # prefix before the key in auth_header; "" for raw-key headers
+#
+# [custom.extra_headers]
+# "api-version" = "2024-05-01"
+#
+# [custom.extra_body]
+# temperature = 0.2
+# user = "my-app"
 "#;
 
 fn default_provider() -> String {
@@ -50,7 +69,64 @@ pub struct Config {
     /// Path to an extra CA cert (PEM/CRT) to trust, e.g. for a corporate
     /// VPN/proxy that TLS-inspects with its own root certificate.
     pub extra_ca_cert: Option<String>,
+    /// Only read when `provider = "custom"` (or "others").
+    pub custom: Option<CustomOptions>,
     pub system_prompt: Option<String>,
+}
+
+/// Deserialized `[custom]` table for `provider = "custom"` — a company
+/// gateway or other non-standard endpoint. See DEFAULT_CONFIG_TEMPLATE for
+/// the field-by-field meaning; this just carries the raw TOML values before
+/// they're converted into `coders_provider::CustomProviderOptions`.
+#[derive(Debug, Deserialize, Default)]
+pub struct CustomOptions {
+    pub style: Option<String>,
+    pub max_tokens_field: Option<String>,
+    pub auth_header: Option<String>,
+    pub auth_scheme: Option<String>,
+    pub extra_headers: Option<std::collections::BTreeMap<String, String>>,
+    pub extra_body: Option<toml::Table>,
+}
+
+fn toml_to_json(value: &toml::Value) -> serde_json::Value {
+    match value {
+        toml::Value::String(s) => serde_json::Value::String(s.clone()),
+        toml::Value::Integer(i) => serde_json::Value::from(*i),
+        toml::Value::Float(f) => serde_json::Number::from_f64(*f).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
+        toml::Value::Boolean(b) => serde_json::Value::Bool(*b),
+        toml::Value::Datetime(dt) => serde_json::Value::String(dt.to_string()),
+        toml::Value::Array(arr) => serde_json::Value::Array(arr.iter().map(toml_to_json).collect()),
+        toml::Value::Table(table) => serde_json::Value::Object(table.iter().map(|(k, v)| (k.clone(), toml_to_json(v))).collect()),
+    }
+}
+
+impl CustomOptions {
+    pub fn to_provider_options(&self) -> Result<coders_provider::CustomProviderOptions> {
+        let defaults = coders_provider::CustomProviderOptions::default();
+
+        let style = match self.style.as_deref() {
+            None | Some("openai") => coders_provider::RequestStyle::OpenAi,
+            Some("anthropic") => coders_provider::RequestStyle::Anthropic,
+            Some(other) => anyhow::bail!("custom.style must be \"openai\" or \"anthropic\", got \"{other}\""),
+        };
+
+        let extra_body = match &self.extra_body {
+            Some(table) => match toml_to_json(&toml::Value::Table(table.clone())) {
+                serde_json::Value::Object(map) => map,
+                _ => unreachable!("a TOML table always converts to a JSON object"),
+            },
+            None => serde_json::Map::new(),
+        };
+
+        Ok(coders_provider::CustomProviderOptions {
+            style,
+            max_tokens_field: self.max_tokens_field.clone().unwrap_or(defaults.max_tokens_field),
+            auth_header: self.auth_header.clone().unwrap_or(defaults.auth_header),
+            auth_scheme: self.auth_scheme.clone().unwrap_or(defaults.auth_scheme),
+            extra_headers: self.extra_headers.clone().unwrap_or_default().into_iter().collect(),
+            extra_body,
+        })
+    }
 }
 
 /// `~/.coders` — created on install/first run, holds config.toml and skills/.
