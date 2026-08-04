@@ -55,8 +55,9 @@ fn pick_word(seed: usize) -> &'static str {
 
 /// Reveals each word's Morse code dot-by-dot, holds it fully spelled out
 /// briefly, then moves to the next cute word — forever, until the caller
-/// aborts the task (when the turn it was covering for finishes).
-async fn animate_morse(pb: ProgressBar, label: String) {
+/// aborts the task (when the turn it was covering for finishes). Pure
+/// Morse, on purpose — no English label alongside it to decode it for you.
+async fn animate_morse(pb: ProgressBar) {
     let mut word_index = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos() as usize).unwrap_or(0);
     loop {
         let word = pick_word(word_index);
@@ -66,20 +67,20 @@ async fn animate_morse(pb: ProgressBar, label: String) {
 
         for i in 1..=morse_chars.len() {
             let revealed: String = morse_chars[..i].iter().collect();
-            pb.set_message(format!("{revealed}  {label}"));
+            pb.set_message(revealed);
             pb.tick();
             tokio::time::sleep(Duration::from_millis(55)).await;
         }
-        pb.set_message(format!("{morse}  {label}"));
+        pb.set_message(morse);
         pb.tick();
         tokio::time::sleep(Duration::from_millis(650)).await;
     }
 }
 
-fn spinner(label: &str) -> (ProgressBar, tokio::task::JoinHandle<()>) {
+fn spinner() -> (ProgressBar, tokio::task::JoinHandle<()>) {
     let pb = ProgressBar::new_spinner();
     pb.set_style(ProgressStyle::with_template("{msg}").unwrap());
-    let handle = tokio::spawn(animate_morse(pb.clone(), label.to_string()));
+    let handle = tokio::spawn(animate_morse(pb.clone()));
     (pb, handle)
 }
 
@@ -119,13 +120,16 @@ impl ReplUi {
         match event {
             AgentEvent::Thinking => {
                 self.clear_spinner();
-                self.spinner = Some(spinner("Thinking..."));
+                self.spinner = Some(spinner());
             }
             AgentEvent::ToolCall { name, input } => {
                 self.clear_spinner();
+                // The `skill` tool is how skill invocations flow through the
+                // same Tool trait as everything else — mark it distinctly.
+                let marker = if name == "skill" { "de" } else { "-.-" };
                 let args = compact_args(&input);
-                println!("{} {}", style("->").cyan().bold(), style(format!("{name}({args})")).cyan());
-                self.spinner = Some(spinner(&format!("Running {name}...")));
+                println!("{} {}", style(marker).cyan().bold(), style(format!("{name}({args})")).cyan());
+                self.spinner = Some(spinner());
             }
             AgentEvent::ToolResult { output, is_error, .. } => {
                 self.clear_spinner();

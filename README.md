@@ -141,16 +141,21 @@ terminal going silent until the final answer:
 
 ```
 > find the auth middleware
--> grep({"pattern":"middleware","path":"src"})
+-.- grep({"pattern":"middleware","path":"src"})
   src/auth.rs:12: pub fn auth_middleware(req: Request) -> Response {
 
 It's in src/auth.rs:12.
 ```
 
+Markers are Morse/telegraph shorthand: `-.-` (prosign "K", "go ahead") marks
+a regular tool call; `de` (ham radio for "this is / from") marks a skill
+invocation specifically, since loading a skill goes through the same `skill`
+tool under the hood.
+
 While waiting on the model or a tool, a spinner plays a cute word
-telegraphed in Morse code, revealed dot-by-dot, cycling until the turn
-resolves. Colors and the spinner both auto-disable when stdout isn't a
-terminal (piped output, `NO_COLOR`, CI, etc).
+telegraphed in Morse code, revealed dot-by-dot — pure Morse, no English
+label — cycling until the turn resolves. Colors and the spinner both
+auto-disable when stdout isn't a terminal (piped output, `NO_COLOR`, CI, etc).
 
 ## Workspace layout
 
