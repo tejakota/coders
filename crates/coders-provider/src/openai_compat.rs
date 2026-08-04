@@ -15,8 +15,9 @@ pub struct OpenAiCompatProvider {
 }
 
 impl OpenAiCompatProvider {
-    pub fn new(config: ProviderConfig) -> Self {
-        Self { client: Client::new(), config }
+    pub fn new(config: ProviderConfig) -> Result<Self> {
+        let client = crate::client::build_client(&config)?;
+        Ok(Self { client, config })
     }
 
     fn url(&self) -> String {
