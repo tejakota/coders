@@ -70,7 +70,7 @@ async fn animate_morse(pb: ProgressBar, label: String) {
             pb.tick();
             tokio::time::sleep(Duration::from_millis(55)).await;
         }
-        pb.set_message(format!("{morse} = {word}  {label}"));
+        pb.set_message(format!("{morse}  {label}"));
         pb.tick();
         tokio::time::sleep(Duration::from_millis(650)).await;
     }
