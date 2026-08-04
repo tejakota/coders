@@ -65,26 +65,48 @@ fn parse_content_block(value: &Value) -> Option<ContentBlock> {
     }
 }
 
+/// Builds the Anthropic Messages API request body. Shared with the `custom`
+/// provider for company gateways that speak Anthropic's request shape.
+pub(crate) fn build_body(request: &ChatRequest) -> Value {
+    let tools: Vec<Value> =
+        request.tools.iter().map(|t| json!({ "name": t.name, "description": t.description, "input_schema": t.input_schema })).collect();
+
+    let mut body = json!({
+        "model": request.model,
+        "max_tokens": request.max_tokens,
+        "messages": request.messages.iter().map(message_to_json).collect::<Vec<_>>(),
+    });
+    if let Some(system) = &request.system {
+        body["system"] = json!(system);
+    }
+    if !tools.is_empty() {
+        body["tools"] = json!(tools);
+    }
+    body
+}
+
+/// Parses an Anthropic Messages API response. Shared with the `custom` provider.
+pub(crate) fn parse_response(payload: &Value) -> (Vec<ContentBlock>, StopReason) {
+    let content = payload
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().filter_map(parse_content_block).collect())
+        .unwrap_or_default();
+
+    let stop_reason = match payload.get("stop_reason").and_then(Value::as_str) {
+        Some("tool_use") => StopReason::ToolUse,
+        Some("end_turn") => StopReason::EndTurn,
+        Some(other) => StopReason::Other(other.to_string()),
+        None => StopReason::EndTurn,
+    };
+
+    (content, stop_reason)
+}
+
 #[async_trait]
 impl ProviderClient for AnthropicProvider {
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
-        let tools: Vec<Value> = request
-            .tools
-            .iter()
-            .map(|t| json!({ "name": t.name, "description": t.description, "input_schema": t.input_schema }))
-            .collect();
-
-        let mut body = json!({
-            "model": request.model,
-            "max_tokens": request.max_tokens,
-            "messages": request.messages.iter().map(message_to_json).collect::<Vec<_>>(),
-        });
-        if let Some(system) = &request.system {
-            body["system"] = json!(system);
-        }
-        if !tools.is_empty() {
-            body["tools"] = json!(tools);
-        }
+        let body = build_body(&request);
 
         let resp = self
             .client
@@ -103,19 +125,7 @@ impl ProviderClient for AnthropicProvider {
             anyhow::bail!("Anthropic API error ({status}): {payload}");
         }
 
-        let content = payload
-            .get("content")
-            .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(parse_content_block).collect())
-            .unwrap_or_default();
-
-        let stop_reason = match payload.get("stop_reason").and_then(Value::as_str) {
-            Some("tool_use") => StopReason::ToolUse,
-            Some("end_turn") => StopReason::EndTurn,
-            Some(other) => StopReason::Other(other.to_string()),
-            None => StopReason::EndTurn,
-        };
-
+        let (content, stop_reason) = parse_response(&payload);
         Ok(ChatResponse { content, stop_reason })
     }
 }
