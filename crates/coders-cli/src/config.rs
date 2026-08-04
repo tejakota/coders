@@ -8,7 +8,10 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# coders config — edit this file, the
 provider = "anthropic"
 model = "claude-sonnet-5"
 
-# name of the environment variable holding your API key
+# Either paste your key directly:
+# api_key = "sk-..."
+# ...or (recommended, keeps the key out of this file) name an environment
+# variable that holds it:
 api_key_env = "ANTHROPIC_API_KEY"
 
 # override the default endpoint, e.g. for Ollama:
@@ -35,8 +38,12 @@ pub struct Config {
     pub provider: String,
     #[serde(default = "default_model")]
     pub model: String,
+    /// The API key itself, pasted directly. Takes priority over
+    /// `api_key_env` if both are set.
+    pub api_key: Option<String>,
     /// Name of the env var holding the API key (e.g. "ANTHROPIC_API_KEY").
-    /// Omit for local endpoints that don't need auth.
+    /// Ignored if `api_key` is set. Omit both for local endpoints that
+    /// don't need auth.
     pub api_key_env: Option<String>,
     /// Override the default endpoint, e.g. for Ollama: "http://localhost:11434/v1/chat/completions".
     pub base_url: Option<String>,
@@ -78,7 +85,30 @@ impl Config {
         Ok(config)
     }
 
-    pub fn api_key(&self) -> String {
-        self.api_key_env.as_ref().and_then(|name| std::env::var(name).ok()).unwrap_or_default()
+    /// Resolves the API key: `api_key` directly if set, else the value of
+    /// the env var named by `api_key_env`. Errors loudly if `api_key_env`
+    /// names a variable that isn't actually set, rather than silently
+    /// sending an unauthenticated request and surfacing a confusing remote
+    /// "bearer token" error instead. Leaving both unset (e.g. a local
+    /// Ollama with no auth) is fine and resolves to no key.
+    pub fn require_api_key(&self) -> Result<String> {
+        if let Some(key) = &self.api_key {
+            if !key.trim().is_empty() {
+                return Ok(key.clone());
+            }
+        }
+        let Some(env_name) = &self.api_key_env else { return Ok(String::new()) };
+        match std::env::var(env_name) {
+            Ok(value) if !value.is_empty() => Ok(value),
+            _ => anyhow::bail!(
+                "api_key_env is set to '{env_name}' in ~/.coders/config.toml, but that \
+                 environment variable is not set (or is empty) in this terminal session.\n\n\
+                 Either paste the key directly as `api_key = \"...\"` in config.toml, or set \
+                 the environment variable and run coders again in the SAME terminal:\n\
+                 \x20 bash/zsh:   export {env_name}=sk-...\n\
+                 \x20 PowerShell: $env:{env_name} = \"sk-...\"\n\
+                 \x20 Windows cmd, persistent: setx {env_name} \"sk-...\"  (then open a NEW terminal — setx does not affect the current one)"
+            ),
+        }
     }
 }

@@ -36,14 +36,19 @@ Edit `~/.coders/config.toml`:
 ```toml
 provider = "anthropic"        # "anthropic" | "openai" | "ollama"
 model = "claude-sonnet-5"
-api_key_env = "ANTHROPIC_API_KEY"   # name of the env var holding your key
+
+# Either paste your key directly...
+# api_key = "sk-..."
+# ...or (recommended) name an env var that holds it:
+api_key_env = "ANTHROPIC_API_KEY"
 
 # base_url = "http://localhost:11434/v1/chat/completions"  # e.g. Ollama
 # extra_ca_cert = "C:\\path\\to\\corp-ca.pem"              # see "Corporate VPN / proxy TLS" below
 # system_prompt = "You are my coding assistant."
 ```
 
-Set the API key in your shell:
+`api_key_env` is the *name* of an environment variable, not the key itself
+— set that variable in your shell:
 ```sh
 export ANTHROPIC_API_KEY=sk-...
 ```
@@ -52,6 +57,12 @@ Then run:
 ```sh
 coders
 ```
+
+If `api_key_env` is set in config.toml but the variable isn't actually set
+in that terminal (a common trap: Windows `setx` only takes effect in a
+*new* terminal, not the one you ran it in), `coders` now fails immediately
+with a clear message instead of silently sending an unauthenticated
+request and surfacing a confusing 401 from the server.
 
 ### Corporate VPN / proxy TLS ("invalid peer certificate")
 
