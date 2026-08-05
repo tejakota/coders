@@ -6,7 +6,7 @@ use coders_core::Agent;
 use coders_provider::{build_provider, ProviderConfig};
 use config::Config;
 use console::style;
-use repl::ReplUi;
+use repl::{ReplGate, ReplUi};
 use std::io::Write;
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are coders, a terminal-based coding assistant. \
@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
     let base_system = config.system_prompt.clone().unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string());
     let system = Some(format!("{base_system}{skill_catalog}"));
 
-    let mut agent = Agent::new(provider, tools, config.model.clone(), system);
+    let mut agent = Agent::new(provider, tools, Box::new(ReplGate), config.model.clone(), system);
 
     println!("coders — {} / {}", config.provider, config.model);
     println!("Type your request, or /exit to quit.\n");

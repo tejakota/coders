@@ -1,8 +1,18 @@
-use coders_core::AgentEvent;
+use async_trait::async_trait;
+use coders_core::{AgentEvent, ToolGate};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::Value;
+use std::io::Write;
 use std::time::Duration;
+
+/// The go-ahead prosign ("K") — the same signal shown next to a tool call.
+/// Keying it back is how the operator grants permission to send.
+const GO_AHEAD: &str = "-.-";
+/// The negative ("N") — the explicit decline, symmetric with `GO_AHEAD`.
+/// Anything else typed (including a blank line) also declines; this is
+/// just the labeled, discoverable way to do it on purpose.
+const HOLD: &str = "-.";
 
 const MAX_RESULT_PREVIEW: usize = 300;
 
@@ -122,14 +132,18 @@ impl ReplUi {
                 self.clear_spinner();
                 self.spinner = Some(spinner());
             }
-            AgentEvent::ToolCall { name, input } => {
+            AgentEvent::ToolCall { name, input, needs_confirmation } => {
                 self.clear_spinner();
                 // The `skill` tool is how skill invocations flow through the
                 // same Tool trait as everything else — mark it distinctly.
-                let marker = if name == "skill" { "de" } else { "-.-" };
+                let marker = if name == "skill" { "de" } else { GO_AHEAD };
                 let args = compact_args(&input);
                 println!("{} {}", style(marker).cyan().bold(), style(format!("{name}({args})")).cyan());
-                self.spinner = Some(spinner());
+                // If a confirmation prompt is about to print, don't race it
+                // with a spinner also redrawing the same terminal region.
+                if !needs_confirmation {
+                    self.spinner = Some(spinner());
+                }
             }
             AgentEvent::ToolResult { output, is_error, .. } => {
                 self.clear_spinner();
@@ -153,5 +167,33 @@ impl ReplUi {
             handle.abort();
             pb.finish_and_clear();
         }
+    }
+}
+
+/// Gates risky tool calls (`bash`, `write_file`) behind an interactive
+/// telegraph-style handshake: the operator keys back the same go-ahead
+/// prosign shown next to the call to grant it, in place of a plain y/n.
+pub struct ReplGate;
+
+#[async_trait]
+impl ToolGate for ReplGate {
+    async fn approve(&self, _name: &str, _input: &Value) -> bool {
+        print!(
+            "  {} key back {} to send, {} to hold the line\n> ",
+            style("--").dim(),
+            style(GO_AHEAD).green().bold(),
+            style(HOLD).yellow().bold()
+        );
+        std::io::stdout().flush().ok();
+
+        let reply = tokio::task::spawn_blocking(|| {
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line).ok();
+            line
+        })
+        .await
+        .unwrap_or_default();
+
+        reply.trim() == GO_AHEAD
     }
 }
