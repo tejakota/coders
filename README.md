@@ -152,6 +152,24 @@ a regular tool call; `de` (ham radio for "this is / from") marks a skill
 invocation specifically, since loading a skill goes through the same `skill`
 tool under the hood.
 
+### Confirmation for risky tools
+
+`bash` and `write_file` can execute arbitrary shell commands or overwrite
+arbitrary files — a model response acting on bad input, a prompt injection
+from a file it read, or its own mistake could do real damage with no gate
+at all. Both require an explicit confirmation before they run:
+
+```
+-.- bash({"command":"rm -rf build/"})
+  -- key back -.- to send, -. to hold the line
+>
+```
+
+Key back `-.-` (the same go-ahead shown next to the call) to run it, or
+`-.` (or anything else, including a blank line — declining is the default)
+to hold the line. Any tool can opt into this via `Tool::requires_confirmation()`;
+`read_file`/`grep`/`find`/`skill` don't, since they're read-only.
+
 While waiting on the model or a tool, a spinner plays a cute word
 telegraphed in Morse code, revealed dot-by-dot — pure Morse, no English
 label — cycling until the turn resolves. Colors and the spinner both
@@ -163,7 +181,7 @@ auto-disable when stdout isn't a terminal (piped output, `NO_COLOR`, CI, etc).
   OpenAI-compatible, and `custom` backends; TLS via rustls + OS native cert
   store, with optional `extra_ca_cert` support
 - `crates/coders-tools` — `Tool` trait + built-ins (`read_file`,
-  `write_file`, `bash`, `grep`, `find`)
+  `write_file`, `bash` — `cmd` on Windows, `sh` elsewhere — `grep`, `find`)
 - `crates/coders-skills` — SKILL.md loader, the `skill` tool, and the two
   bundled skills under `assets/skills/`
 - `crates/coders-core` — `Agent`: the send → tool-call → tool-result loop,
