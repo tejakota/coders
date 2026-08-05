@@ -53,6 +53,10 @@ impl Tool for WriteFileTool {
         })
     }
 
+    fn requires_confirmation(&self) -> bool {
+        true
+    }
+
     async fn execute(&self, input: Value) -> Result<String> {
         let path = input.get("path").and_then(Value::as_str).context("missing 'path' argument")?;
         let content = input.get("content").and_then(Value::as_str).context("missing 'content' argument")?;

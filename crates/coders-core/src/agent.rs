@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use coders_provider::{ChatRequest, ContentBlock, Message, ProviderClient, StopReason, ToolDef};
 use coders_tools::Tool;
 use serde_json::Value;
@@ -13,8 +14,26 @@ pub enum AgentEvent {
     /// About to send a request to the provider — may be the first turn, or
     /// a follow-up after feeding tool results back in.
     Thinking,
-    ToolCall { name: String, input: Value },
+    ToolCall { name: String, input: Value, needs_confirmation: bool },
     ToolResult { name: String, output: String, is_error: bool },
+}
+
+/// Decides whether a tool call flagged via `Tool::requires_confirmation`
+/// is allowed to run. The REPL implements this with an interactive
+/// telegraph-style keyed confirmation; `AllowAll` is available for
+/// non-interactive use.
+#[async_trait]
+pub trait ToolGate: Send + Sync {
+    async fn approve(&self, name: &str, input: &Value) -> bool;
+}
+
+pub struct AllowAll;
+
+#[async_trait]
+impl ToolGate for AllowAll {
+    async fn approve(&self, _name: &str, _input: &Value) -> bool {
+        true
+    }
 }
 
 /// Owns conversation history and drives the read-plan-act loop: send the
@@ -23,6 +42,7 @@ pub enum AgentEvent {
 pub struct Agent {
     provider: Box<dyn ProviderClient>,
     tools: Vec<Box<dyn Tool>>,
+    gate: Box<dyn ToolGate>,
     model: String,
     system: Option<String>,
     max_tokens: u32,
@@ -30,8 +50,14 @@ pub struct Agent {
 }
 
 impl Agent {
-    pub fn new(provider: Box<dyn ProviderClient>, tools: Vec<Box<dyn Tool>>, model: String, system: Option<String>) -> Self {
-        Self { provider, tools, model, system, max_tokens: 4096, history: Vec::new() }
+    pub fn new(
+        provider: Box<dyn ProviderClient>,
+        tools: Vec<Box<dyn Tool>>,
+        gate: Box<dyn ToolGate>,
+        model: String,
+        system: Option<String>,
+    ) -> Self {
+        Self { provider, tools, gate, model, system, max_tokens: 4096, history: Vec::new() }
     }
 
     fn tool_defs(&self) -> Vec<ToolDef> {
@@ -74,10 +100,21 @@ impl Agent {
 
             let mut result_blocks = Vec::new();
             for (id, name, input) in tool_uses {
-                on_event(AgentEvent::ToolCall { name: name.clone(), input: input.clone() });
-                let outcome = match self.find_tool(&name) {
-                    Some(tool) => tool.execute(input).await,
-                    None => Err(anyhow::anyhow!("unknown tool: {name}")),
+                // Dropped immediately after reading the flag, so this
+                // borrow of `self.tools` doesn't overlap the `self.gate`
+                // borrow below.
+                let needs_confirmation = self.find_tool(&name).map(|t| t.requires_confirmation()).unwrap_or(false);
+                on_event(AgentEvent::ToolCall { name: name.clone(), input: input.clone(), needs_confirmation });
+
+                let approved = if needs_confirmation { self.gate.approve(&name, &input).await } else { true };
+
+                let outcome = if !approved {
+                    Err(anyhow::anyhow!("declined by user"))
+                } else {
+                    match self.find_tool(&name) {
+                        Some(tool) => tool.execute(input).await,
+                        None => Err(anyhow::anyhow!("unknown tool: {name}")),
+                    }
                 };
                 let (content, is_error) = match outcome {
                     Ok(text) => (text, false),

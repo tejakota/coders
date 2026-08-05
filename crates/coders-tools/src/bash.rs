@@ -13,7 +13,7 @@ impl Tool for BashTool {
     }
 
     fn description(&self) -> &str {
-        "Run a shell command and return its combined stdout/stderr output."
+        "Run a shell command (sh on Linux/macOS, cmd on Windows) and return its combined stdout/stderr output."
     }
 
     fn input_schema(&self) -> Value {
@@ -24,9 +24,29 @@ impl Tool for BashTool {
         })
     }
 
+    fn requires_confirmation(&self) -> bool {
+        true
+    }
+
     async fn execute(&self, input: Value) -> Result<String> {
         let command = input.get("command").and_then(Value::as_str).context("missing 'command' argument")?;
-        let output = Command::new("sh").arg("-c").arg(command).output().await.context("spawning shell")?;
+
+        // A stock Windows install has no `sh` on PATH (that only shows up
+        // via WSL/Git Bash), so shell out through cmd.exe there instead.
+        #[cfg(windows)]
+        let mut cmd = {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(command);
+            c
+        };
+        #[cfg(not(windows))]
+        let mut cmd = {
+            let mut c = Command::new("sh");
+            c.arg("-c").arg(command);
+            c
+        };
+
+        let output = cmd.output().await.context("spawning shell")?;
         let mut result = String::from_utf8_lossy(&output.stdout).to_string();
         result.push_str(&String::from_utf8_lossy(&output.stderr));
         if !output.status.success() {
