@@ -179,8 +179,7 @@ pub struct ReplGate;
 impl ToolGate for ReplGate {
     async fn approve(&self, _name: &str, _input: &Value) -> bool {
         print!(
-            "  {} key back {} to send, {} to hold the line\n> ",
-            style("--").dim(),
+            "  use {} to send, {} to hold the line\n> ",
             style(GO_AHEAD).green().bold(),
             style(HOLD).yellow().bold()
         );

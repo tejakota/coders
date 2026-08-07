@@ -161,7 +161,7 @@ at all. Both require an explicit confirmation before they run:
 
 ```
 -.- bash({"command":"rm -rf build/"})
-  -- key back -.- to send, -. to hold the line
+  use -.- to send, -. to hold the line
 >
 ```
 
