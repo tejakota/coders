@@ -78,12 +78,18 @@ impl Agent {
     pub async fn send(&mut self, user_input: &str, mut on_event: impl FnMut(AgentEvent)) -> Result<String> {
         self.history.push(Message::user_text(user_input));
 
+        // Set for the round right after a decline: forces the next request
+        // out with no tools offered, so the model must answer in text
+        // instead of just retrying the same call (possibly with tweaked
+        // input) as if the user had never said no.
+        let mut tools_blocked = false;
+
         for _ in 0..MAX_TOOL_ROUNDS {
             let request = ChatRequest {
                 model: self.model.clone(),
                 system: self.system.clone(),
                 messages: self.history.clone(),
-                tools: self.tool_defs(),
+                tools: if tools_blocked { Vec::new() } else { self.tool_defs() },
                 max_tokens: self.max_tokens,
             };
 
@@ -109,7 +115,8 @@ impl Agent {
                 let approved = if needs_confirmation { self.gate.approve(&name, &input).await } else { true };
 
                 let outcome = if !approved {
-                    Err(anyhow::anyhow!("declined by user"))
+                    tools_blocked = true;
+                    Err(anyhow::anyhow!("declined by user — do not retry this or any other tool call this turn; ask the user how to proceed instead"))
                 } else {
                     match self.find_tool(&name) {
                         Some(tool) => tool.execute(input).await,

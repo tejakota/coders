@@ -35,10 +35,11 @@ async fn main() -> Result<()> {
     )?;
 
     let mut tools = coders_tools::builtin_tools();
-    let skills = coders_skills::load_skills(&coders_skills::default_skill_dirs());
+    let skill_dirs = coders_skills::default_skill_dirs();
+    let skills = coders_skills::load_skills(&skill_dirs);
     let skill_catalog = coders_skills::catalog(&skills);
     if !skills.is_empty() {
-        tools.push(Box::new(coders_skills::SkillTool::new(skills)));
+        tools.push(Box::new(coders_skills::SkillTool::new(skills.clone())));
     }
 
     let base_system = config.system_prompt.clone().unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string());
@@ -47,6 +48,16 @@ async fn main() -> Result<()> {
     let mut agent = Agent::new(provider, tools, Box::new(ReplGate), config.model.clone(), system);
 
     println!("coders — {} / {}", config.provider, config.model);
+    // Self-diagnosing: shows exactly where it looked and what it found, so
+    // a skill that silently failed to parse (or was dropped in the wrong
+    // directory) is visible immediately instead of just "not working".
+    let searched = skill_dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ");
+    if skills.is_empty() {
+        println!("No skills found (searched: {searched})");
+    } else {
+        let names = skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ");
+        println!("Loaded {} skill(s): {names} (searched: {searched})", skills.len());
+    }
     println!("Type your request, or /exit to quit.\n");
 
     let stdin = std::io::stdin();
