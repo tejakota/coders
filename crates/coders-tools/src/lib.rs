@@ -1,8 +1,10 @@
 mod bash;
+mod edit;
 mod fs;
 mod search;
 
 pub use bash::BashTool;
+pub use edit::EditFileTool;
 pub use fs::{ReadFileTool, WriteFileTool};
 pub use search::{FindTool, GrepTool};
 
@@ -29,5 +31,12 @@ pub trait Tool: Send + Sync {
 }
 
 pub fn builtin_tools() -> Vec<Box<dyn Tool>> {
-    vec![Box::new(ReadFileTool), Box::new(WriteFileTool), Box::new(BashTool), Box::new(GrepTool), Box::new(FindTool)]
+    vec![
+        Box::new(ReadFileTool),
+        Box::new(WriteFileTool),
+        Box::new(EditFileTool),
+        Box::new(BashTool),
+        Box::new(GrepTool),
+        Box::new(FindTool),
+    ]
 }

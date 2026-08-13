@@ -134,6 +134,48 @@ Dart, Rust) — are bundled into the binary itself and auto-installed into
 `~/.coders/skills/` on first run. They're never overwritten once present,
 so editing them locally sticks.
 
+## STORY.md (Project Instructions)
+
+You can add project-specific instructions by creating a `STORY.md` file in either:
+
+1. **Workspace directory:** `./.coders/STORY.md`
+2. **Coders home directory:** `~/.coders/STORY.md`
+
+The workspace file takes priority over the home file. When found, the agent
+will load and follow these instructions as part of its system prompt.
+
+**Example `./.coders/STORY.md`:**
+
+```markdown
+# Project Story
+
+You are building a REST API for an e-commerce platform.
+
+## Requirements
+- Use Rust with Actix-web framework
+- PostgreSQL for database
+- JWT authentication
+- Write unit tests for all handlers
+- Follow clean code principles
+
+## Style Guide
+- Use descriptive variable names
+- Keep functions under 50 lines
+- Maximum line length: 100 characters
+- Use 4-space indentation
+```
+
+When you run `coders`, you'll see:
+
+```
+coders — anthropic / claude-sonnet-5
+STORY.md loaded - following project-specific instructions
+Loaded 2 skill(s): code-analysis, code-generation (searched: /home/teja/.coders/skills, .coders/skills)
+Type your request, or /exit to quit.
+```
+
+The agent will then incorporate these instructions when responding to your requests.
+
 ## REPL
 
 Tool calls and their results print live as the agent works, instead of the
@@ -141,11 +183,35 @@ terminal going silent until the final answer:
 
 ```
 > find the auth middleware
--.- grep({"pattern":"middleware","path":"src"})
-  src/auth.rs:12: pub fn auth_middleware(req: Request) -> Response {
+
+  -.- grep  🔍 searching contents
+      • pattern: middleware
+      • path: src
+      ↳ src/auth.rs:12: pub fn auth_middleware(req: Request) -> Response {
 
 It's in src/auth.rs:12.
 ```
+
+Each call prints as a headline (what it's doing, and with which tool) over
+bulleted arguments, the one naming *what* the call acts on first. Short
+arguments sit inline; anything multi-line — a diff, file content, a JSON
+payload — drops into an indented block instead of being squashed onto one
+line:
+
+```
+  -.- edit_file  ✂️ editing file
+      • path: src/auth.rs
+      • diff:
+        │ <<<<<<< SEARCH
+        │ pub fn auth_middleware(req: Request) -> Response {
+        │ =======
+        │ pub async fn auth_middleware(req: Request) -> Response {
+        │ >>>>>>> REPLACE
+      ↳ applied 1 edit(s) to src/auth.rs (240 lines now)
+```
+
+Long values are elided and long blocks are capped with a `… N more lines`
+note, so a single huge argument or result can't flood the terminal.
 
 Markers are Morse/telegraph shorthand: `-.-` (prosign "K", "go ahead") marks
 a regular tool call; `de` (ham radio for "this is / from") marks a skill
@@ -154,15 +220,17 @@ tool under the hood.
 
 ### Confirmation for risky tools
 
-`bash` and `write_file` can execute arbitrary shell commands or overwrite
-arbitrary files — a model response acting on bad input, a prompt injection
-from a file it read, or its own mistake could do real damage with no gate
-at all. Both require an explicit confirmation before they run:
+`bash`, `write_file`, and `edit_file` can execute arbitrary shell commands or
+rewrite arbitrary files — a model response acting on bad input, a prompt
+injection from a file it read, or its own mistake could do real damage with no
+gate at all. All three require an explicit confirmation before they run:
 
 ```
--.- bash({"command":"rm -rf build/"})
-  use -.- to send, -. to hold the line
->
+  -.- bash  ⚡ running command
+      • command: rm -rf build/
+      ⚠ confirmation required
+      -.- to send, -. to hold the line
+      >
 ```
 
 Key back `-.-` (the same go-ahead shown next to the call) to run it, or
@@ -175,19 +243,48 @@ telegraphed in Morse code, revealed dot-by-dot — pure Morse, no English
 label — cycling until the turn resolves. Colors and the spinner both
 auto-disable when stdout isn't a terminal (piped output, `NO_COLOR`, CI, etc).
 
+## Editing files
+
+`write_file` rewrites a whole file, which burns tokens and risks clobbering
+parts the model never read. `edit_file` changes just the parts that need to
+change, using conflict-marker style search/replace blocks:
+
+```
+<<<<<<< SEARCH
+for (i, key) in keys.iter().enumerate() {
+=======
+for key in keys.iter() {
+>>>>>>> REPLACE
+```
+
+- The SEARCH text must match **exactly one** place in the file. If it matches
+  several, the edit is refused with the match count — include surrounding
+  context lines instead of guessing which one was meant.
+- Cosmetic mismatches the model can't see — trailing whitespace, CRLF line
+  endings — are tolerated on a retry pass; real mismatches are not, so a stale
+  read fails loudly rather than editing the wrong lines. Untouched lines come
+  back byte-identical, CRLF files included.
+- An empty SEARCH section appends the REPLACE text to the end of the file; an
+  empty REPLACE section deletes the matched lines.
+- Multiple blocks in one call are applied in order, each seeing the result of
+  the previous one. If any block fails, the whole call fails and the file is
+  left untouched.
+
 ## Workspace layout
 
 - `crates/coders-provider` — `ProviderClient` trait + Anthropic,
   OpenAI-compatible, and `custom` backends; TLS via rustls + OS native cert
   store, with optional `extra_ca_cert` support
 - `crates/coders-tools` — `Tool` trait + built-ins (`read_file`,
-  `write_file`, `bash` — `cmd` on Windows, `sh` elsewhere — `grep`, `find`)
+  `write_file`, `edit_file`, `bash` — `cmd` on Windows, `sh` elsewhere —
+  `grep`, `find`)
 - `crates/coders-skills` — SKILL.md loader, the `skill` tool, and the two
   bundled skills under `assets/skills/`
 - `crates/coders-core` — `Agent`: the send → tool-call → tool-result loop,
   emitting `AgentEvent`s a caller can render live
 - `crates/coders-cli` — the `coders` binary, config, REPL (spinner + colored
-  tool-call output)
+  tool-call output), and `render` — the pure, unit-tested formatting layer
+  behind that output
 
 ## Building prebuilt binaries yourself
 
