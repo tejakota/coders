@@ -10,6 +10,8 @@ use config::Config;
 use console::style;
 use repl::{ReplGate, ReplUi};
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are coders, a terminal-based coding assistant. \
 You have access to tools for reading, searching, writing, and editing files, and for running shell commands. \
@@ -93,18 +95,50 @@ async fn main() -> Result<()> {
         let names = skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ");
         println!("Loaded {} skill(s): {names} (searched: {searched})", skills.len());
     }
-    println!("Type your request, or /exit to quit.\n");
+    println!("Type your request, or /exit to quit.");
+    println!("Ctrl+C interrupts, Ctrl+D exits.\n");
 
-    let stdin = std::io::stdin();
+    // Shared interrupt flag - Ctrl+C sets this, and we check it at appropriate points
+    let interrupted = Arc::new(AtomicBool::new(false));
+
     let mut ui = ReplUi::new();
+    let result = run_repl(&mut agent, &mut ui, interrupted).await;
+
+    result
+}
+
+async fn run_repl(
+    agent: &mut Agent,
+    ui: &mut ReplUi,
+    interrupted: Arc<AtomicBool>,
+) -> Result<()> {
     loop {
+        // Reset interrupt flag before reading new input
+        interrupted.store(false, Ordering::SeqCst);
+
         print!("{} ", style(">").green().bold());
         std::io::stdout().flush().ok();
 
-        let mut line = String::new();
-        if stdin.read_line(&mut line)? == 0 {
-            break; // EOF
-        }
+        // Read input with Ctrl+C and Ctrl+D handling
+        let line = tokio::select! {
+            // Ctrl+C handler
+            _ = tokio::signal::ctrl_c() => {
+                println!("^C");
+                continue;
+            }
+            // Read input in a blocking task
+            result = tokio::task::spawn_blocking(read_input) => {
+                match result? {
+                    Some(line) => line,
+                    None => {
+                        // EOF (Ctrl+D) - exit the session
+                        println!();
+                        break;
+                    }
+                }
+            }
+        };
+
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -113,7 +147,18 @@ async fn main() -> Result<()> {
             break;
         }
 
-        match agent.send(line, |event| ui.on_event(event)).await {
+        // Process the input with interrupt handling
+        let result = tokio::select! {
+            result = agent.send(line, |event| ui.on_event(event)) => result,
+            _ = tokio::signal::ctrl_c() => {
+                ui.finish();
+                println!("^C");
+                interrupted.store(true, Ordering::SeqCst);
+                continue;
+            }
+        };
+
+        match result {
             Ok(reply) => {
                 ui.finish();
                 println!("\n{reply}\n");
@@ -126,4 +171,22 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Reads a line from stdin, returning None on EOF (Ctrl+D).
+fn read_input() -> Option<String> {
+    let mut line = String::new();
+    match std::io::stdin().read_line(&mut line) {
+        Ok(0) => {
+            // EOF (Ctrl+D)
+            None
+        }
+        Ok(_) => {
+            Some(line)
+        }
+        Err(_) => {
+            // On error, return empty string
+            Some(String::new())
+        }
+    }
 }
