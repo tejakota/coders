@@ -1,8 +1,40 @@
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use coders_provider::{ChatRequest, ContentBlock, Message, ProviderClient, StopReason, ToolDef};
 use coders_tools::Tool;
+use serde_json::Value;
 
 const MAX_TOOL_ROUNDS: usize = 25;
+
+/// Emitted as the agent works through a turn so a caller (the REPL, a
+/// future TUI, ...) can show progress instead of going silent until the
+/// final answer.
+#[derive(Debug, Clone)]
+pub enum AgentEvent {
+    /// About to send a request to the provider — may be the first turn, or
+    /// a follow-up after feeding tool results back in.
+    Thinking,
+    ToolCall { name: String, input: Value, needs_confirmation: bool },
+    ToolResult { name: String, output: String, is_error: bool },
+}
+
+/// Decides whether a tool call flagged via `Tool::requires_confirmation`
+/// is allowed to run. The REPL implements this with an interactive
+/// telegraph-style keyed confirmation; `AllowAll` is available for
+/// non-interactive use.
+#[async_trait]
+pub trait ToolGate: Send + Sync {
+    async fn approve(&self, name: &str, input: &Value) -> bool;
+}
+
+pub struct AllowAll;
+
+#[async_trait]
+impl ToolGate for AllowAll {
+    async fn approve(&self, _name: &str, _input: &Value) -> bool {
+        true
+    }
+}
 
 /// Owns conversation history and drives the read-plan-act loop: send the
 /// transcript to the model, execute any tool calls it asks for, feed the
@@ -10,6 +42,7 @@ const MAX_TOOL_ROUNDS: usize = 25;
 pub struct Agent {
     provider: Box<dyn ProviderClient>,
     tools: Vec<Box<dyn Tool>>,
+    gate: Box<dyn ToolGate>,
     model: String,
     system: Option<String>,
     max_tokens: u32,
@@ -17,8 +50,14 @@ pub struct Agent {
 }
 
 impl Agent {
-    pub fn new(provider: Box<dyn ProviderClient>, tools: Vec<Box<dyn Tool>>, model: String, system: Option<String>) -> Self {
-        Self { provider, tools, model, system, max_tokens: 4096, history: Vec::new() }
+    pub fn new(
+        provider: Box<dyn ProviderClient>,
+        tools: Vec<Box<dyn Tool>>,
+        gate: Box<dyn ToolGate>,
+        model: String,
+        system: Option<String>,
+    ) -> Self {
+        Self { provider, tools, gate, model, system, max_tokens: 4096, history: Vec::new() }
     }
 
     fn tool_defs(&self) -> Vec<ToolDef> {
@@ -33,19 +72,28 @@ impl Agent {
     }
 
     /// Sends one user turn through the loop, executing any requested tools
-    /// along the way, and returns the model's final text reply.
-    pub async fn send(&mut self, user_input: &str) -> Result<String> {
+    /// along the way, and returns the model's final text reply. `on_event`
+    /// fires around each provider call and tool execution so a caller can
+    /// show live progress instead of going silent until the final answer.
+    pub async fn send(&mut self, user_input: &str, mut on_event: impl FnMut(AgentEvent)) -> Result<String> {
         self.history.push(Message::user_text(user_input));
+
+        // Set for the round right after a decline: forces the next request
+        // out with no tools offered, so the model must answer in text
+        // instead of just retrying the same call (possibly with tweaked
+        // input) as if the user had never said no.
+        let mut tools_blocked = false;
 
         for _ in 0..MAX_TOOL_ROUNDS {
             let request = ChatRequest {
                 model: self.model.clone(),
                 system: self.system.clone(),
                 messages: self.history.clone(),
-                tools: self.tool_defs(),
+                tools: if tools_blocked { Vec::new() } else { self.tool_defs() },
                 max_tokens: self.max_tokens,
             };
 
+            on_event(AgentEvent::Thinking);
             let response = self.provider.chat(request).await.context("provider chat call failed")?;
             self.history.push(Message { role: coders_provider::Role::Assistant, content: response.content.clone() });
 
@@ -58,14 +106,32 @@ impl Agent {
 
             let mut result_blocks = Vec::new();
             for (id, name, input) in tool_uses {
-                let outcome = match self.find_tool(&name) {
-                    Some(tool) => tool.execute(input).await,
-                    None => Err(anyhow::anyhow!("unknown tool: {name}")),
+                // Dropped immediately after reading the flag, so this
+                // borrow of `self.tools` doesn't overlap the `self.gate`
+                // borrow below.
+                let needs_confirmation = self.find_tool(&name).map(|t| t.requires_confirmation()).unwrap_or(false);
+                on_event(AgentEvent::ToolCall { name: name.clone(), input: input.clone(), needs_confirmation });
+
+                let approved = if needs_confirmation { self.gate.approve(&name, &input).await } else { true };
+
+                let outcome = if !approved {
+                    tools_blocked = true;
+                    Err(anyhow::anyhow!("declined by user — do not retry this or any other tool call this turn; ask the user how to proceed instead"))
+                } else {
+                    match self.find_tool(&name) {
+                        Some(tool) => tool.execute(input).await,
+                        None => Err(anyhow::anyhow!("unknown tool: {name}")),
+                    }
                 };
                 let (content, is_error) = match outcome {
                     Ok(text) => (text, false),
-                    Err(err) => (err.to_string(), true),
+                    // `{err:#}` joins the whole context chain; plain Display
+                    // shows only the outermost wrapper ("editing foo.rs"),
+                    // throwing away the part the model needs to recover
+                    // ("SEARCH text matches 2 places — add more context").
+                    Err(err) => (format!("{err:#}"), true),
                 };
+                on_event(AgentEvent::ToolResult { name, output: content.clone(), is_error });
                 result_blocks.push(ContentBlock::ToolResult { tool_use_id: id, content, is_error });
             }
             self.history.push(Message { role: coders_provider::Role::User, content: result_blocks });

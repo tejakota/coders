@@ -78,6 +78,19 @@ pub fn default_skill_dirs() -> Vec<PathBuf> {
 
 /// A short catalog to embed in the system prompt so the model knows what's
 /// available without paying for every skill's full body up front.
+pub fn catalog(skills: &[Skill]) -> String {
+    if skills.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "\n\nAvailable skills (call the `skill` tool with the skill's name to load its full instructions before doing matching work):\n",
+    );
+    for skill in skills {
+        out.push_str(&format!("- {}: {}\n", skill.name, skill.description));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,17 +133,4 @@ mod tests {
         assert!(out.contains("a: does a"));
         assert_eq!(catalog(&[]), "");
     }
-}
-
-pub fn catalog(skills: &[Skill]) -> String {
-    if skills.is_empty() {
-        return String::new();
-    }
-    let mut out = String::from(
-        "\n\nAvailable skills (call the `skill` tool with the skill's name to load its full instructions before doing matching work):\n",
-    );
-    for skill in skills {
-        out.push_str(&format!("- {}: {}\n", skill.name, skill.description));
-    }
-    out
 }

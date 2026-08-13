@@ -1,8 +1,10 @@
 mod bash;
+mod edit;
 mod fs;
 mod search;
 
 pub use bash::BashTool;
+pub use edit::EditFileTool;
 pub use fs::{ReadFileTool, WriteFileTool};
 pub use search::{FindTool, GrepTool};
 
@@ -18,8 +20,23 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &str;
     fn input_schema(&self) -> Value;
     async fn execute(&self, input: Value) -> Result<String>;
+
+    /// Whether running this tool needs explicit user approval first —
+    /// e.g. shell execution or overwriting a file, where a wrong or
+    /// adversarial model response could do real damage. Defaults to false;
+    /// override for anything irreversible or destructive.
+    fn requires_confirmation(&self) -> bool {
+        false
+    }
 }
 
 pub fn builtin_tools() -> Vec<Box<dyn Tool>> {
-    vec![Box::new(ReadFileTool), Box::new(WriteFileTool), Box::new(BashTool), Box::new(GrepTool), Box::new(FindTool)]
+    vec![
+        Box::new(ReadFileTool),
+        Box::new(WriteFileTool),
+        Box::new(EditFileTool),
+        Box::new(BashTool),
+        Box::new(GrepTool),
+        Box::new(FindTool),
+    ]
 }
