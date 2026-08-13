@@ -7,6 +7,10 @@ edition.workspace = true
 name = "coders"
 path = "src/main.rs"
 
+[lib]
+name = "coders_cli"
+path = "src/lib.rs"
+
 [dependencies]
 coders-provider = { path = "../coders-provider" }
 coders-tools = { path = "../coders-tools" }
@@ -21,3 +25,7 @@ dirs.workspace = true
 toml = "0.8"
 indicatif = "0.17"
 console = "0.15"
+shellexpand = "3.1.2"
+
+[dev-dependencies]
+shellexpand = "3.1.2"

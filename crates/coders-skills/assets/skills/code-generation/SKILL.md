@@ -7,8 +7,10 @@ Before writing code into an existing project, look at how it already does
 things: use `find`/`grep`/`read_file` to check naming conventions, existing
 error-handling patterns, import style, and whichever of the project's own
 libraries already solve part of the problem. Match what's there rather than
-introducing a second way to do the same thing. Write the result with
-`write_file`, then re-read what you wrote before calling it done.
+introducing a second way to do the same thing. Create new files with
+`write_file` and change existing ones with `edit_file` — its SEARCH text has
+to match the file exactly, so read the file first and copy the lines you're
+replacing. Re-read what you wrote before calling it done.
 
 ## General approach
 

@@ -125,7 +125,11 @@ impl Agent {
                 };
                 let (content, is_error) = match outcome {
                     Ok(text) => (text, false),
-                    Err(err) => (err.to_string(), true),
+                    // `{err:#}` joins the whole context chain; plain Display
+                    // shows only the outermost wrapper ("editing foo.rs"),
+                    // throwing away the part the model needs to recover
+                    // ("SEARCH text matches 2 places — add more context").
+                    Err(err) => (format!("{err:#}"), true),
                 };
                 on_event(AgentEvent::ToolResult { name, output: content.clone(), is_error });
                 result_blocks.push(ContentBlock::ToolResult { tool_use_id: id, content, is_error });
