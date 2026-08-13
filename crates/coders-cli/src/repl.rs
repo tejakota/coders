@@ -1,20 +1,10 @@
+use crate::render::{self, GO_AHEAD};
 use async_trait::async_trait;
 use coders_core::{AgentEvent, ToolGate};
-use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::Value;
 use std::io::Write;
 use std::time::Duration;
-
-/// The go-ahead prosign ("K") — the same signal shown next to a tool call.
-/// Keying it back is how the operator grants permission to send.
-const GO_AHEAD: &str = "-.-";
-/// The negative ("N") — the explicit decline, symmetric with `GO_AHEAD`.
-/// Anything else typed (including a blank line) also declines; this is
-/// just the labeled, discoverable way to do it on purpose.
-const HOLD: &str = "-.";
-
-const MAX_RESULT_PREVIEW: usize = 300;
 
 /// Cute one-word status messages, telegraphed in Morse while the model or a
 /// tool is running — a small delight in place of a boring |/-\ spinner.
@@ -94,29 +84,18 @@ fn spinner() -> (ProgressBar, tokio::task::JoinHandle<()>) {
     (pb, handle)
 }
 
-fn compact_args(input: &Value) -> String {
-    match input {
-        Value::Object(map) if map.is_empty() => String::new(),
-        other => serde_json::to_string(other).unwrap_or_default(),
+fn print_lines(lines: Vec<String>) {
+    for line in lines {
+        println!("{line}");
     }
-}
-
-fn truncate(text: &str, max_chars: usize) -> String {
-    let text = text.trim();
-    let char_count = text.chars().count();
-    if char_count <= max_chars {
-        return text.to_string();
-    }
-    let head: String = text.chars().take(max_chars).collect();
-    format!("{head}... ({} more chars)", char_count - max_chars)
 }
 
 /// Turns `AgentEvent`s into live terminal output: a Morse-code spinner while
-/// the model or a tool is running, a line per tool call, and a truncated
-/// preview of each result — so the REPL shows what's happening instead of
-/// going silent until the final answer. Color/spinner rendering auto-disables
-/// when stdout isn't a terminal (piped output, `NO_COLOR`, etc), handled by
-/// the `console`/`indicatif` crates themselves.
+/// the model or a tool is running, then each tool call and result rendered by
+/// [`crate::render`] — so the REPL shows what's happening instead of going
+/// silent until the final answer. Color/spinner rendering auto-disables when
+/// stdout isn't a terminal (piped output, `NO_COLOR`, etc), handled by the
+/// `console`/`indicatif` crates themselves.
 pub struct ReplUi {
     spinner: Option<(ProgressBar, tokio::task::JoinHandle<()>)>,
 }
@@ -134,11 +113,7 @@ impl ReplUi {
             }
             AgentEvent::ToolCall { name, input, needs_confirmation } => {
                 self.clear_spinner();
-                // The `skill` tool is how skill invocations flow through the
-                // same Tool trait as everything else — mark it distinctly.
-                let marker = if name == "skill" { "de" } else { GO_AHEAD };
-                let args = compact_args(&input);
-                println!("{} {}", style(marker).cyan().bold(), style(format!("{name}({args})")).cyan());
+                print_lines(render::tool_call_lines(&name, &input));
                 // If a confirmation prompt is about to print, don't race it
                 // with a spinner also redrawing the same terminal region.
                 if !needs_confirmation {
@@ -147,11 +122,7 @@ impl ReplUi {
             }
             AgentEvent::ToolResult { output, is_error, .. } => {
                 self.clear_spinner();
-                if is_error {
-                    println!("  {} {}", style("error:").red().bold(), style(truncate(&output, MAX_RESULT_PREVIEW)).red());
-                } else {
-                    println!("  {}", style(truncate(&output, MAX_RESULT_PREVIEW)).dim());
-                }
+                print_lines(render::tool_result_lines(&output, is_error));
             }
         }
     }
@@ -170,7 +141,7 @@ impl ReplUi {
     }
 }
 
-/// Gates risky tool calls (`bash`, `write_file`) behind an interactive
+/// Gates risky tool calls (`bash`, `write_file`, `edit_file`) behind an interactive
 /// telegraph-style handshake: the operator keys back the same go-ahead
 /// prosign shown next to the call to grant it, in place of a plain y/n.
 pub struct ReplGate;
@@ -178,11 +149,8 @@ pub struct ReplGate;
 #[async_trait]
 impl ToolGate for ReplGate {
     async fn approve(&self, _name: &str, _input: &Value) -> bool {
-        print!(
-            "  use {} to send, {} to hold the line\n> ",
-            style(GO_AHEAD).green().bold(),
-            style(HOLD).yellow().bold()
-        );
+        print_lines(render::confirmation_lines());
+        print!("      > ");
         std::io::stdout().flush().ok();
 
         let reply = tokio::task::spawn_blocking(|| {

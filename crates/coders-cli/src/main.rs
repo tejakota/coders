@@ -1,5 +1,7 @@
 mod config;
+mod render;
 mod repl;
+mod story_loader;
 
 use anyhow::Result;
 use coders_core::Agent;
@@ -10,11 +12,22 @@ use repl::{ReplGate, ReplUi};
 use std::io::Write;
 
 const DEFAULT_SYSTEM_PROMPT: &str = "You are coders, a terminal-based coding assistant. \
-You have access to tools for reading files, writing files, and running shell commands. \
-Use them when needed to complete the user's request.";
+You have access to tools for reading, searching, writing, and editing files, and for running shell commands. \
+Use them when needed to complete your user's request. \
+To change a file that already exists, read it first and then use edit_file with search/replace blocks — \
+reserve write_file for creating new files or full rewrites.";
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Prints a canned transcript through the real renderer — a way to see
+    // exactly what tool activity will look like without spending a model turn.
+    if std::env::args().nth(1).as_deref() == Some("render-demo") {
+        for line in render::demo_lines() {
+            println!("{line}");
+        }
+        return Ok(());
+    }
+
     if std::env::args().nth(1).as_deref() == Some("init") {
         let path = Config::ensure_scaffold()?;
         println!("coders home ready at {}", path.parent().unwrap().display());
@@ -42,12 +55,34 @@ async fn main() -> Result<()> {
         tools.push(Box::new(coders_skills::SkillTool::new(skills.clone())));
     }
 
-    let base_system = config.system_prompt.clone().unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string());
-    let system = Some(format!("{base_system}{skill_catalog}"));
+    // Load STORY.md instructions
+    let story_instructions = match story_loader::load_story_instructions() {
+        Ok(Some(instructions)) => instructions,
+        Ok(None) => String::new(),
+        Err(e) => {
+            eprintln!("Warning: Failed to load STORY.md: {e}");
+            String::new()
+        }
+    };
 
-    let mut agent = Agent::new(provider, tools, Box::new(ReplGate), config.model.clone(), system);
+    let base_system = config.system_prompt.clone().unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string());
+    let mut system = format!("{base_system}{skill_catalog}");
+
+    if !story_instructions.is_empty() {
+        system.push_str("\n\nSTORY.md INSTRUCTIONS:\n");
+        system.push_str(&story_instructions);
+        system.push_str("\n");
+    }
+
+    let mut agent = Agent::new(provider, tools, Box::new(ReplGate), config.model.clone(), Some(system));
 
     println!("coders — {} / {}", config.provider, config.model);
+    
+    // Print STORY.md status if found
+    if !story_instructions.is_empty() {
+        println!("STORY.md loaded - following project-specific instructions");
+    }
+    
     // Self-diagnosing: shows exactly where it looked and what it found, so
     // a skill that silently failed to parse (or was dropped in the wrong
     // directory) is visible immediately instead of just "not working".
