@@ -1,0 +1,31 @@
+# --- Rust build artifacts (the 1.7 GB offender) ---
+/target/
+**/target/
+
+# Cargo.lock IS committed on purpose: this repo ships binaries, so builds
+# must be reproducible. Do not add it here.
+
+# --- Local coders state ---
+.coders/cache/
+.coders/logs/
+.coders/*.db
+
+# --- Secrets / environment ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Editor / OS cruft ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Misc ---
+*.log
+*.tmp
+*.bk
